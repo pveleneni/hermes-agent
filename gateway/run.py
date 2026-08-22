@@ -15821,10 +15821,25 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         return _handler
 
     def _make_default_profile_message_handler(self):
-        """Scope a multiplexed default-profile message from ingress onward."""
-        profile_home = Path(get_hermes_home())
+        """Scope a multiplexed default-profile message from ingress onward.
 
+        Resolve the routed profile PER EVENT (mirroring
+        ``_make_default_profile_platform_event_handler``) rather than freezing
+        the process-global home at handler-construction time.  On a multiplexed
+        gateway the primary adapter owns creds for the default home, but an
+        inbound source (e.g. a profile-routed Signal DM) may be scoped to a
+        secondary profile.  The transcript *load* in ``_handle_message`` must
+        run under that source's profile home or it reads the - empty - default
+        store while the agent-turn writes land in the routed profile's store,
+        producing same-session amnesia (history=0 every turn).
+        """
         async def _handler(event):
+            source = getattr(event, "source", None)
+            profile_home = (
+                self._resolve_profile_home_for_source(source)
+                if source is not None
+                else Path(get_hermes_home())
+            )
             with _profile_runtime_scope(profile_home):
                 return await self._handle_message(event)
 
